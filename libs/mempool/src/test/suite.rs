@@ -1,4 +1,4 @@
-use std::{sync::Arc, thread};
+use std::{sync::Arc, thread, time::Duration};
 
 use crate::{Mempool, Transaction};
 
@@ -13,13 +13,14 @@ where
 pub fn test_ordering_by_gas_price<T: Mempool>(tester: impl Tester<T>) {
     let mempool = tester.create_mempool();
 
-    mempool.submit(Transaction::without_load("tx2", 50, 100));
-    mempool.submit(Transaction::without_load("tx5", 20, 200));
-    mempool.submit(Transaction::without_load("tx3", 30, 50));
-    mempool.submit(Transaction::without_load("tx6", 10, 50));
-    mempool.submit(Transaction::without_load("tx4", 20, 50));
-    mempool.submit(Transaction::without_load("tx1", 60, 50));
+    mempool.submit(Transaction::with_empty_load("tx2", 50, 100));
+    mempool.submit(Transaction::with_empty_load("tx5", 20, 200));
+    mempool.submit(Transaction::with_empty_load("tx3", 30, 50));
+    mempool.submit(Transaction::with_empty_load("tx6", 10, 50));
+    mempool.submit(Transaction::with_empty_load("tx4", 20, 50));
+    mempool.submit(Transaction::with_empty_load("tx1", 60, 50));
 
+    std::thread::sleep(Duration::from_millis(10)); // wait for all transactions to be harvested by the receiver thread
     let drained = mempool.drain(3);
     assert_eq!(drained.len(), 3);
     assert_eq!(drained[0].id, "tx1");
@@ -36,7 +37,6 @@ pub fn test_ordering_by_gas_price<T: Mempool>(tester: impl Tester<T>) {
     assert!(drained.is_empty());
 }
 
-
 pub fn test_concurrent_submit<T: Mempool>(tester: impl Tester<T>) {
     let mempool = Arc::new(tester.create_mempool());
 
@@ -45,7 +45,7 @@ pub fn test_concurrent_submit<T: Mempool>(tester: impl Tester<T>) {
     for i in 0..100 {
         let mempool_clone = mempool.clone();
         let handle = thread::spawn(move || {
-            mempool_clone.submit(Transaction::without_load(
+            mempool_clone.submit(Transaction::with_empty_load(
                 format!("tx{}", i).as_str(),
                 i as u64 % 10, // Some variation in gas prices,
                 100 + i as u64,
@@ -81,7 +81,7 @@ pub fn test_concurrent_submit_and_drain<T: Mempool>(tester: impl Tester<T>) {
     for i in 0..50 {
         let mempool_clone = mempool.clone();
         let handle = thread::spawn(move || {
-            mempool_clone.submit(Transaction::without_load(
+            mempool_clone.submit(Transaction::with_empty_load(
                 format!("tx{}", i).as_str(),
                 i as u64 % 10,
                 100 + i as u64,

@@ -1,6 +1,6 @@
 use std::sync::Mutex;
 
-use crate::mempool::{Mempool, Transaction};
+use mempool::{Mempool, Transaction};
 
 /// Naive implementation of a memory pool that just organizes all elements linearly within a vector.
 /// No optimizations are attempted with this implementation.
@@ -38,7 +38,7 @@ impl Mempool for NaivePool {
 
 #[cfg(test)]
 mod test_suite {
-    use crate::test::suite;
+    use mempool::test::suite;
 
     use super::NaivePool;
 

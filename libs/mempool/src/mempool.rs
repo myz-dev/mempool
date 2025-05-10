@@ -33,7 +33,8 @@ impl Transaction {
         }
     }
 
-    pub fn without_load(id: &str, gas_price: u64, timestamp: u64) -> Self {
+    /// Creates a [`Transaction`] with an empty vector as its `payload`.
+    pub fn with_empty_load(id: &str, gas_price: u64, timestamp: u64) -> Self {
         Self {
             id: id.to_string(),
             gas_price,
@@ -67,8 +68,8 @@ mod tests {
     /// Higher gas price -> Higher priority
     #[test]
     fn cmp_diff_gas_price() {
-        let low = Transaction::without_load("low", 10, 100);
-        let high = Transaction::without_load("high", 20, 50);
+        let low = Transaction::with_empty_load("low", 10, 100);
+        let high = Transaction::with_empty_load("high", 20, 50);
 
         assert_eq!(low.cmp(&high), Ordering::Less);
         assert_eq!(high.cmp(&low), Ordering::Greater);
@@ -77,8 +78,8 @@ mod tests {
     /// On same gas price, earlier timestamp has higher priority
     #[test]
     fn cmp_same_gas_diff_timestamp() {
-        let early = Transaction::without_load("early", 10, 100);
-        let late = Transaction::without_load("late", 10, 200);
+        let early = Transaction::with_empty_load("early", 10, 100);
+        let late = Transaction::with_empty_load("late", 10, 200);
 
         assert_eq!(early.cmp(&late), Ordering::Greater);
         assert_eq!(late.cmp(&early), Ordering::Less);
@@ -88,8 +89,8 @@ mod tests {
     /// sorting becomes a no-op.
     #[test]
     fn cmp_ordering_equal_tx() {
-        let a = Transaction::without_load("a", 10, 100);
-        let b = Transaction::without_load("b", 10, 100);
+        let a = Transaction::with_empty_load("a", 10, 100);
+        let b = Transaction::with_empty_load("b", 10, 100);
 
         assert_eq!(a.cmp(&b), Ordering::Equal);
         assert_eq!(b.partial_cmp(&a), Some(Ordering::Equal));
@@ -98,10 +99,10 @@ mod tests {
     #[test]
     fn sort_transactions() {
         let mut txs = vec![
-            Transaction::without_load("t1", 5, 100), // -- lowest price, recent addition
-            Transaction::without_load("t2", 5, 300), // -- lowest price, late addition
-            Transaction::without_load("t3", 20, 50), // -- highest price
-            Transaction::without_load("t4", 10, 200), // -- second highest price
+            Transaction::with_empty_load("t1", 5, 100), // -- lowest price, recent addition
+            Transaction::with_empty_load("t2", 5, 300), // -- lowest price, late addition
+            Transaction::with_empty_load("t3", 20, 50), // -- highest price
+            Transaction::with_empty_load("t4", 10, 200), // -- second highest price
         ];
         txs.sort();
 
