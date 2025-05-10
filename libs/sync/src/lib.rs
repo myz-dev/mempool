@@ -19,7 +19,7 @@ struct StorageFactory;
 impl StorageFactory {
     /// Creates a new [`Storage`] instance with given `capacity` that is ready to submit and drain
     /// items from its queue.
-    fn new<T: Debug + Ord + Send + 'static>(capacity: usize) -> Channels<T> {
+    fn new_queue<T: Debug + Ord + Send + 'static>(capacity: usize) -> Channels<T> {
         Storage::start(capacity)
     }
 }
@@ -182,7 +182,7 @@ impl Mempool for Queue<Transaction> {
     }
 
     fn drain(&self, n: usize) -> Vec<Transaction> {
-        if let Err(_) = self.channels.drain_command_source.send(n) {
+        if self.channels.drain_command_source.send(n).is_err() {
             eprintln!("Error: Could not drain from queue, the command channel is closed or full!");
         }
         match self.channels.drain_sink.recv() {
@@ -199,7 +199,12 @@ impl Mempool for Queue<Transaction> {
 
 impl Queue<Transaction> {
     pub fn new(capacity: usize) -> Self {
-        let channels = StorageFactory::new(capacity);
+        let channels = StorageFactory::new_queue(capacity);
         Self { channels }
+    }
+
+    pub fn stop(self) {
+        self.channels.queue_running.store(false, Ordering::Relaxed);
+        // Could wait here until the thread is torn down.
     }
 }

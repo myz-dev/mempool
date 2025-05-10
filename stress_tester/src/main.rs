@@ -69,6 +69,6 @@ fn run_sync_channels(cfg: Cfg) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_async(cfg: Cfg) -> anyhow::Result<()> {
+fn run_async(_cfg: Cfg) -> anyhow::Result<()> {
     todo!()
 }
