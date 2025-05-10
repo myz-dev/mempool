@@ -1,0 +1,13 @@
+[package]
+edition = "2024"
+name = "stress_tester"
+version = "0.1.0"
+
+[dependencies]
+mempool = { path = "./../libs/mempool" }
+naive = { path = "./../libs/naive" }
+sync = { path = "./../libs/sync" }
+
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+strum = { workspace = true, features = ["derive"] }

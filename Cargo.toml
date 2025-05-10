@@ -1,3 +1,13 @@
 [workspace]
-members = ["libs/mempool"]
+members = ["libs/mempool", "libs/naive", "libs/sync", "stress_tester"]
 resolver = "2"
+
+
+[workspace.dependencies]
+anyhow = "1"
+clap = "4.5"
+criterion = "0.5"
+crossbeam = "0.8"
+rand = "0.9"
+strum = "0.27"
+uuid = "1.16"

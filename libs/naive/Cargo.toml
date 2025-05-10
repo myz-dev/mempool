@@ -1,0 +1,14 @@
+[package]
+edition = "2024"
+name = "naive"
+version = "0.1.0"
+
+[dependencies]
+mempool = { path = "./../mempool" }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+[[bench]]
+harness = false
+name = "naive_vector"

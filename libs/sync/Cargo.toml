@@ -1,0 +1,18 @@
+[package]
+edition = "2024"
+name = "sync"
+version = "0.1.0"
+
+[dependencies]
+mempool = { path = "./../mempool" }
+
+anyhow = { workspace = true }
+crossbeam = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+
+
+[[bench]]
+harness = false
+name = "sync_channels"
