@@ -90,6 +90,9 @@ impl<T: Debug + Ord + Send + 'static> Storage<T> {
         while self.running.load(Ordering::Relaxed) {
             self.submit_or_continue()?;
             self.drain_or_continue()?;
+
+            // Throttle thread usage. Could also test "parking" the thread.
+            std::thread::sleep(Duration::from_nanos(10));
         }
 
         Ok(())
