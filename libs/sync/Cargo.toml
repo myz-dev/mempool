@@ -16,3 +16,7 @@ criterion = { workspace = true }
 [[bench]]
 harness = false
 name = "sync_channels"
+
+[[bench]]
+harness = false
+name = "sync_locks"
