@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use mempool::{Mempool, Transaction};
-use sync::Queue;
+use sync::ChanneledQueue;
 
 fn create_tx(gas_price: u64) -> Transaction {
     Transaction {
@@ -14,7 +14,7 @@ fn create_tx(gas_price: u64) -> Transaction {
 }
 
 fn submit_drain(c: &mut Criterion) {
-    let pool = Queue::new(50_000);
+    let pool = ChanneledQueue::new(50_000);
 
     c.bench_function("sync_channels submit_drain", |b| {
         b.iter(|| {
@@ -27,7 +27,7 @@ fn submit_drain(c: &mut Criterion) {
 }
 
 fn submit_high_priority_on_large_queue(c: &mut Criterion) {
-    let pool = Queue::new(500_000);
+    let pool = ChanneledQueue::new(500_000);
     // -- Prepare large pool
     let mut gas_price = 0;
     for _ in 0..50_000 {

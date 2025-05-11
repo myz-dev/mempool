@@ -27,7 +27,9 @@ pub enum Implementation {
     #[strum(ascii_case_insensitive)]
     Naive,
     #[strum(ascii_case_insensitive)]
-    Sync,
+    SyncChannels,
+    #[strum(ascii_case_insensitive)]
+    SyncLocks,
     #[strum(ascii_case_insensitive)]
     Async,
 }
