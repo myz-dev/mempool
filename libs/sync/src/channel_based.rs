@@ -32,8 +32,7 @@ struct Storage<T: Debug + Ord> {
 
     submitter_sink: Receiver<T>,
 
-    drain_source: Sender<Vec<T>>,
-    drain_command_sink: Receiver<usize>,
+    drain_command_sink: Receiver<(usize, Sender<Vec<T>>)>,
 
     running: Arc<AtomicBool>,
 }
@@ -41,17 +40,13 @@ struct Storage<T: Debug + Ord> {
 #[derive(Debug)]
 struct Channels<T: Debug + Ord> {
     item_source: Sender<T>,
-
-    drain_sink: Receiver<Vec<T>>,
-    drain_command_source: Sender<usize>,
-
+    drain_command_source: Sender<(usize, Sender<Vec<T>>)>,
     queue_running: Arc<AtomicBool>,
 }
 
 impl<T: Debug + Ord + Send + 'static> Storage<T> {
     fn start(capacity: usize) -> Channels<T> {
         let (tx, rx) = crossbeam::channel::unbounded();
-        let (tx_drain, rx_drain) = crossbeam::channel::bounded(1);
         let (tx_command, rx_command) = crossbeam::channel::bounded(1);
         let running = Arc::new(AtomicBool::new(true));
         let queue_running = Arc::clone(&running);
@@ -59,7 +54,6 @@ impl<T: Debug + Ord + Send + 'static> Storage<T> {
         let storage = Self {
             max_heap: BinaryHeap::with_capacity(capacity),
             submitter_sink: rx,
-            drain_source: tx_drain,
             drain_command_sink: rx_command,
             running,
         };
@@ -83,7 +77,6 @@ impl<T: Debug + Ord + Send + 'static> Storage<T> {
 
         Channels {
             item_source: tx,
-            drain_sink: rx_drain,
             drain_command_source: tx_command,
             queue_running,
         }
@@ -97,11 +90,6 @@ impl<T: Debug + Ord + Send + 'static> Storage<T> {
         while self.running.load(Ordering::Relaxed) {
             self.submit_or_continue()?;
             self.drain_or_continue()?;
-
-            // crossbeam::select! {
-            //     recv(self.drain_command_sink) -> msg => println!("DRAIN COMMAND!"),
-
-            //  }
         }
 
         Ok(())
@@ -131,8 +119,8 @@ impl<T: Debug + Ord + Send + 'static> Storage<T> {
     }
 
     fn drain_or_continue(&mut self) -> anyhow::Result<()> {
-        let count = match self.drain_command_sink.try_recv() {
-            Ok(n) => n,
+        let (count, tx_result) = match self.drain_command_sink.try_recv() {
+            Ok((n, tx_result)) => (n, tx_result),
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Disconnected) => bail!("Drain command channel is disconnected"),
         };
@@ -146,7 +134,7 @@ impl<T: Debug + Ord + Send + 'static> Storage<T> {
             items.push(value);
         }
 
-        self.drain_source
+        tx_result
             .send(items)
             .map_err(|_| anyhow!("Drain channel is disconnected"))
     }
@@ -185,10 +173,16 @@ impl Mempool for Queue<Transaction> {
     }
 
     fn drain(&self, n: usize) -> Vec<Transaction> {
-        if self.channels.drain_command_source.send(n).is_err() {
+        let (tx_drained_items, rx_drained_items) = crossbeam::channel::bounded(1);
+        if self
+            .channels
+            .drain_command_source
+            .send((n, tx_drained_items))
+            .is_err()
+        {
             eprintln!("Error: Could not drain from queue, the command channel is closed or full!");
         }
-        match self.channels.drain_sink.recv() {
+        match rx_drained_items.recv() {
             Ok(v) => v,
             Err(_) => {
                 eprintln!(
