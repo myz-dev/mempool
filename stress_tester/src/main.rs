@@ -1,6 +1,5 @@
 use cfg::Cfg;
 use clap::Parser;
-use mempool::test::stress::{StressTestConfig, run_stress_test};
 use naive::NaivePool;
 use sync::{ChanneledQueue, LockedQueue};
 
@@ -22,6 +21,7 @@ fn main() {
 }
 
 fn run_naive(cfg: Cfg) -> anyhow::Result<()> {
+    use mempool::test::stress::{StressTestConfig, run_stress_test};
     use std::sync::Arc;
 
     let capacity = cfg
@@ -47,6 +47,7 @@ fn run_naive(cfg: Cfg) -> anyhow::Result<()> {
 }
 
 fn run_sync_channels(cfg: Cfg) -> anyhow::Result<()> {
+    use mempool::test::stress::{StressTestConfig, run_stress_test};
     use std::sync::Arc;
 
     let capacity = cfg
@@ -71,6 +72,7 @@ fn run_sync_channels(cfg: Cfg) -> anyhow::Result<()> {
 }
 
 fn run_sync_lock_based(cfg: Cfg) -> anyhow::Result<()> {
+    use mempool::test::stress::{StressTestConfig, run_stress_test};
     use std::sync::Arc;
 
     let capacity = cfg
@@ -95,5 +97,34 @@ fn run_sync_lock_based(cfg: Cfg) -> anyhow::Result<()> {
 }
 
 fn run_async(_cfg: Cfg) -> anyhow::Result<()> {
-    todo!()
+    use async_impl::{StressTestCfg, run_stress_test};
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        let cfg = StressTestCfg {
+            num_producers: 4,
+            num_transactions: 1_000_000,
+            num_consumers: 2,
+            payload_size_range: (100, 1000),
+            drain_interval_us: 100,
+            drain_batch_size: 100,
+            drain_timeout_us: 3_000,
+            gas_price_range: (1, 1000),
+            run_duration_seconds: 30,
+            submission_rate: None, // Max speed
+            latency_tracking: true,
+            print_stats_interval_ms: 1000,
+        };
+        let queue_cfg = async_impl::worker::Cfg {
+            capacity: cfg.num_producers * cfg.num_transactions,
+            submittance_back_pressure: 3_000,
+        };
+        let queue = async_impl::worker::Queue::start(queue_cfg);
+        run_stress_test(cfg, queue.clone()).await;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        queue.stop()
+    });
+    Ok(())
 }

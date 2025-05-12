@@ -41,7 +41,7 @@ fn submit_high_priority_on_large_queue(c: &mut Criterion) {
         b.iter(|| {
             let tx = create_tx(black_box(gas_price));
             pool.submit(tx);
-            
+
             let drained = pool.drain(1);
             assert_eq!(drained[0].gas_price, gas_price); //<-- should equal the last one added (highest gas price)
         });
