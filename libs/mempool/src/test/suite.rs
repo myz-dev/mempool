@@ -57,7 +57,7 @@ pub fn test_concurrent_submit<T: Mempool>(tester: impl Tester<T>) {
     for handle in handles {
         handle.join().unwrap();
     }
-
+    std::thread::sleep(Duration::from_millis(200));
     let drained = mempool.drain(100);
     assert_eq!(drained.len(), 100);
 

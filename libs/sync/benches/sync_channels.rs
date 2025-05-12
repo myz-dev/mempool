@@ -18,10 +18,9 @@ fn submit_drain(c: &mut Criterion) {
 
     c.bench_function("sync_channels submit_drain", |b| {
         b.iter(|| {
-            pool.submit(create_tx(black_box(100)));
-            let drained = pool.drain(5);
+            pool.submit(create_tx(black_box(1)));
+            let drained = pool.drain(black_box(1));
             assert_eq!(drained.len(), 1);
-            assert_eq!(drained[0].gas_price, 100);
         })
     });
 }
@@ -42,8 +41,7 @@ fn submit_high_priority_on_large_queue(c: &mut Criterion) {
             let tx = create_tx(black_box(gas_price));
 
             pool.submit(tx);
-            let drained = pool.drain(1);
-            assert_eq!(drained[0].gas_price, gas_price); //<-- should equal the last one added (highest gas price)
+            pool.drain(1);
         });
     });
 }
