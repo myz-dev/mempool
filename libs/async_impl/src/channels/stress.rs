@@ -1,7 +1,7 @@
+use hdrhistogram::Histogram;
 use mempool::Transaction;
 use rand::Rng;
 use std::{
-    collections::BTreeMap,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -38,11 +38,8 @@ struct TestStats {
     drained_txs: AtomicU64,
     submit_errors: AtomicU64,
     drain_errors: AtomicU64,
-    max_latency_us: AtomicU64,
-    total_latency_us: AtomicU64,
-    latency_samples: AtomicU64,
-    // Store latencies in a mutex-protected BTreeMap for percentile calculation
-    latency_histogram: Mutex<BTreeMap<u64, u64>>,
+    // Store latencies in a histogram for percentile calculation
+    latency_hist: Mutex<Histogram<u64>>,
 }
 
 impl TestStats {
@@ -52,10 +49,10 @@ impl TestStats {
             drained_txs: AtomicU64::new(0),
             submit_errors: AtomicU64::new(0),
             drain_errors: AtomicU64::new(0),
-            max_latency_us: AtomicU64::new(0),
-            total_latency_us: AtomicU64::new(0),
-            latency_samples: AtomicU64::new(0),
-            latency_histogram: Mutex::new(BTreeMap::new()),
+            latency_hist: Mutex::new(
+                Histogram::new_with_max(60_000_000, 3)
+                    .expect("Initializing the histogram should work"),
+            ),
         }
     }
 
@@ -76,54 +73,28 @@ impl TestStats {
     }
 
     fn record_latency(&self, latency_us: u64) {
-        self.total_latency_us
-            .fetch_add(latency_us, Ordering::Relaxed);
-        self.latency_samples.fetch_add(1, Ordering::Relaxed);
-
-        // Update max latency (only if higher)
-        let mut current_max = self.max_latency_us.load(Ordering::Relaxed);
-        while latency_us > current_max {
-            match self.max_latency_us.compare_exchange_weak(
-                current_max,
-                latency_us,
-                Ordering::SeqCst,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => current_max = actual,
-            }
-        }
-
         // Add to histogram for percentile calculation
-        if let Ok(mut hist) = self.latency_histogram.lock() {
-            *hist.entry(latency_us).or_insert(0) += 1;
+        if let Ok(mut hist) = self.latency_hist.lock() {
+            let lat = latency_us.min(hist.high());
+            hist.record(lat).expect("cannot exceed max");
         }
     }
 
     // Calculate the specified percentile from the histogram
     fn calculate_percentile(&self, percentile: f64) -> Option<u64> {
-        if let Ok(hist) = self.latency_histogram.lock() {
+        if let Ok(hist) = self.latency_hist.lock() {
             if hist.is_empty() {
                 return None;
             }
 
-            let total_samples = hist.values().sum::<u64>();
-            let target_count = (total_samples as f64 * percentile / 100.0).ceil() as u64;
-
-            let mut running_count = 0u64;
-            for (&latency, &count) in hist.iter() {
-                running_count += count;
-                if running_count >= target_count {
-                    return Some(latency);
-                }
-            }
+            return Some(hist.value_at_quantile(percentile / 100.0));
         }
         None
     }
 
     fn print_stats(&self, elapsed_seconds: f64, percentiles: &[f64]) {
-        use num_format::{Locale, ToFormattedString};
-        let locale = Locale::de;
+        use num_format::{SystemLocale, ToFormattedString};
+        let locale = SystemLocale::default().unwrap();
 
         let submitted = self.submitted_txs.load(Ordering::Relaxed);
         let drained = self.drained_txs.load(Ordering::Relaxed);
@@ -133,14 +104,8 @@ impl TestStats {
         let submit_rate = submitted as f64 / elapsed_seconds;
         let drain_rate = drained as f64 / elapsed_seconds;
 
-        let avg_latency = if self.latency_samples.load(Ordering::Relaxed) > 0 {
-            self.total_latency_us.load(Ordering::Relaxed) as f64
-                / self.latency_samples.load(Ordering::Relaxed) as f64
-        } else {
-            0.0
-        };
-
-        let max_latency = self.max_latency_us.load(Ordering::Relaxed);
+        let avg_latency = { self.latency_hist.lock().map(|h| h.mean()) }.unwrap_or_default();
+        let max_latency = { self.latency_hist.lock().map(|h| h.max()) }.unwrap_or_default();
 
         println!("--- MEMPOOL STATS [{:.2}s] ---", elapsed_seconds);
         println!("Submitted: {} txs ({:.2} txs/sec)", submitted, submit_rate);
@@ -148,22 +113,20 @@ impl TestStats {
         println!("Queue size: ~{} txs", submitted - drained);
         println!("Errors: {} submit, {} drain", sub_errors, drain_errors);
 
-        if self.latency_samples.load(Ordering::Relaxed) > 0 {
-            println!(
-                "Latency: avg {:.2} μs, max {} μs",
-                ((avg_latency * 10.0) as u64 / 10).to_formatted_string(&locale),
-                max_latency.to_formatted_string(&locale)
-            );
+        println!(
+            "Latency: avg {} μs, max {} μs.",
+            ((avg_latency * 10.0) as u64 / 10).to_formatted_string(&locale),
+            max_latency.to_formatted_string(&locale)
+        );
 
-            // Print percentiles
-            print!("Percentiles: ");
-            for &p in percentiles {
-                if let Some(latency) = self.calculate_percentile(p) {
-                    print!("P{:.1}: {} μs, ", p, latency.to_formatted_string(&locale));
-                }
+        // Print percentiles
+        print!("Percentiles: ");
+        for &p in percentiles {
+            if let Some(latency) = self.calculate_percentile(p) {
+                print!("P{:.1}: {} μs, ", p, latency.to_formatted_string(&locale));
             }
-            println!();
         }
+        println!();
 
         println!("---------------------------");
     }
@@ -253,6 +216,7 @@ async fn run_consumer<T: Mempool>(
     while stop_signal.load(Ordering::Relaxed) == 0 {
         interval.tick().await;
 
+        let start = Instant::now();
         // Send drain request
         match queue
             .drain(cfg.drain_batch_size, cfg.drain_timeout_us)
@@ -260,17 +224,13 @@ async fn run_consumer<T: Mempool>(
         {
             Ok(txs) => {
                 if cfg.latency_tracking && !txs.is_empty() {
-                    for tx in &txs {
-                        let now: u64 = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .expect("time flowing forwards")
-                            .as_micros()
-                            .try_into()
-                            .expect("conversion okay for the next few years");
+                    let delta_us: u64 = start
+                        .elapsed()
+                        .as_micros()
+                        .try_into()
+                        .expect("conversion okay for the next few years");
 
-                        let latency_us = now.saturating_sub(tx.timestamp);
-                        stats.record_latency(latency_us);
-                    }
+                    stats.record_latency(delta_us);
                 }
 
                 stats.record_drain_success(txs.len() as u64);

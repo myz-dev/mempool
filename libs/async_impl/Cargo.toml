@@ -8,6 +8,7 @@ mempool = { path = "./../mempool" }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+hdrhistogram = { workspace = true }
 num-format = { workspace = true, features = ["with-system-locale"] }
 rand = { workspace = true }
 tokio = { workspace = true, features = [
