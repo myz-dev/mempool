@@ -109,13 +109,14 @@ fn run_async(_cfg: Cfg) -> anyhow::Result<()> {
             num_consumers: 2,
             payload_size_range: (100, 1000),
             drain_interval_us: 100,
-            drain_batch_size: 100,
+            drain_batch_size: 500,
             drain_timeout_us: 3_000,
             gas_price_range: (1, 1000),
             run_duration_seconds: 30,
             submission_rate: None, // Max speed
             latency_tracking: true,
             print_stats_interval_ms: 1000,
+            latency_percentiles: vec![50.0, 90.0, 99.0, 99.9],
         };
         let queue_cfg = async_impl::worker::Cfg {
             capacity: cfg.num_producers * cfg.num_transactions,

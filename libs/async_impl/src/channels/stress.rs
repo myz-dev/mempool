@@ -1,17 +1,18 @@
 use mempool::Transaction;
 use rand::Rng;
 use std::{
+    collections::BTreeMap,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::{sync::Barrier, time};
 
 use crate::Mempool;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct StressTestCfg {
     pub num_producers: usize,
     pub num_transactions: usize,
@@ -28,6 +29,8 @@ pub struct StressTestCfg {
     pub latency_tracking: bool,
     /// How often to print stats
     pub print_stats_interval_ms: u64,
+    /// Percentiles to track (e.g. [50.0, 90.0, 99.0, 99.9])
+    pub latency_percentiles: Vec<f64>,
 }
 
 struct TestStats {
@@ -38,6 +41,8 @@ struct TestStats {
     max_latency_us: AtomicU64,
     total_latency_us: AtomicU64,
     latency_samples: AtomicU64,
+    // Store latencies in a mutex-protected BTreeMap for percentile calculation
+    latency_histogram: Mutex<BTreeMap<u64, u64>>,
 }
 
 impl TestStats {
@@ -50,6 +55,7 @@ impl TestStats {
             max_latency_us: AtomicU64::new(0),
             total_latency_us: AtomicU64::new(0),
             latency_samples: AtomicU64::new(0),
+            latency_histogram: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -87,9 +93,38 @@ impl TestStats {
                 Err(actual) => current_max = actual,
             }
         }
+
+        // Add to histogram for percentile calculation
+        if let Ok(mut hist) = self.latency_histogram.lock() {
+            *hist.entry(latency_us).or_insert(0) += 1;
+        }
     }
 
-    fn print_stats(&self, elapsed_seconds: f64) {
+    // Calculate the specified percentile from the histogram
+    fn calculate_percentile(&self, percentile: f64) -> Option<u64> {
+        if let Ok(hist) = self.latency_histogram.lock() {
+            if hist.is_empty() {
+                return None;
+            }
+
+            let total_samples = hist.values().sum::<u64>();
+            let target_count = (total_samples as f64 * percentile / 100.0).ceil() as u64;
+
+            let mut running_count = 0u64;
+            for (&latency, &count) in hist.iter() {
+                running_count += count;
+                if running_count >= target_count {
+                    return Some(latency);
+                }
+            }
+        }
+        None
+    }
+
+    fn print_stats(&self, elapsed_seconds: f64, percentiles: &[f64]) {
+        use num_format::{Locale, ToFormattedString};
+        let locale = Locale::de;
+
         let submitted = self.submitted_txs.load(Ordering::Relaxed);
         let drained = self.drained_txs.load(Ordering::Relaxed);
         let sub_errors = self.submit_errors.load(Ordering::Relaxed);
@@ -114,21 +149,23 @@ impl TestStats {
         println!("Errors: {} submit, {} drain", sub_errors, drain_errors);
 
         if self.latency_samples.load(Ordering::Relaxed) > 0 {
-            println!("Latency: avg {:.2} μs, max {} μs", avg_latency, max_latency);
+            println!(
+                "Latency: avg {:.2} μs, max {} μs",
+                ((avg_latency * 10.0) as u64 / 10).to_formatted_string(&locale),
+                max_latency.to_formatted_string(&locale)
+            );
+
+            // Print percentiles
+            print!("Percentiles: ");
+            for &p in percentiles {
+                if let Some(latency) = self.calculate_percentile(p) {
+                    print!("P{:.1}: {} μs, ", p, latency.to_formatted_string(&locale));
+                }
+            }
+            println!();
         }
 
         println!("---------------------------");
-    }
-}
-
-struct LatencyTrackingTransaction {
-    tx: Transaction,
-    created_at: Instant,
-}
-
-impl From<LatencyTrackingTransaction> for Transaction {
-    fn from(tracked_tx: LatencyTrackingTransaction) -> Self {
-        tracked_tx.tx
     }
 }
 
@@ -154,7 +191,10 @@ async fn run_producer<T: Mempool>(
         None => None,
     };
 
-    let mut interval = delay.map(time::interval);
+    let mut interval = match delay {
+        Some(d) => Some(time::interval(d)),
+        None => None,
+    };
 
     while stop_signal.load(Ordering::Relaxed) == 0 && tx_counter < cfg.num_transactions {
         // If rate limiting is enabled, wait for the next tick
@@ -170,10 +210,12 @@ async fn run_producer<T: Mempool>(
                 rng.random_range(cfg.payload_size_range.0..=cfg.payload_size_range.1);
             let payload = (0..payload_size).map(|_| rng.random::<u8>()).collect();
 
-            let timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos() as u64; // consider changing the `Transaction` type to carry u128
+            let timestamp = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time flowing forwards")
+                .as_micros()
+                .try_into()
+                .expect("conversion okay for the next few years");
 
             let id = format!("tx-{}", tx_counter);
 
@@ -185,12 +227,7 @@ async fn run_producer<T: Mempool>(
             }
         };
 
-        let tracked_tx = LatencyTrackingTransaction {
-            tx,
-            created_at: Instant::now(),
-        };
-
-        match queue.submit(tracked_tx.tx).await {
+        match queue.submit(tx).await {
             Ok(_) => {
                 stats.record_submission_success();
                 tx_counter += 1;
@@ -226,11 +263,17 @@ async fn run_consumer<T: Mempool>(
         {
             Ok(txs) => {
                 if cfg.latency_tracking && !txs.is_empty() {
-                    let now = Instant::now();
-                    // simplify to use one latency per batch instead of analyzing all individual latencies
-                    // (submittance of transaction to drainage completion here)
-                    let latency_us = now.elapsed().as_micros() as u64;
-                    stats.record_latency(latency_us);
+                    for tx in &txs {
+                        let now: u64 = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .expect("time flowing forwards")
+                            .as_micros()
+                            .try_into()
+                            .expect("conversion okay for the next few years");
+
+                        let latency_us = now.saturating_sub(tx.timestamp);
+                        stats.record_latency(latency_us);
+                    }
                 }
 
                 stats.record_drain_success(txs.len() as u64);
@@ -266,7 +309,7 @@ pub async fn run_stress_test<T: Mempool + Clone>(config: StressTestCfg, queue: T
 
         let handle = tokio::spawn(run_producer(
             producer_queue_handle,
-            config,
+            config.clone(),
             producer_stats,
             producer_barrier,
             producer_stop,
@@ -285,7 +328,7 @@ pub async fn run_stress_test<T: Mempool + Clone>(config: StressTestCfg, queue: T
 
         let handle = tokio::spawn(run_consumer(
             consumer_channels,
-            config,
+            config.clone(),
             consumer_stats,
             consumer_barrier,
             consumer_stop,
@@ -298,6 +341,7 @@ pub async fn run_stress_test<T: Mempool + Clone>(config: StressTestCfg, queue: T
     let stats_printer = {
         let stats_clone = Arc::clone(&stats);
         let printer_stop = Arc::clone(&stop_signal);
+        let percentiles = config.latency_percentiles.clone();
 
         tokio::spawn(async move {
             let start_time = Instant::now();
@@ -307,12 +351,12 @@ pub async fn run_stress_test<T: Mempool + Clone>(config: StressTestCfg, queue: T
             while printer_stop.load(Ordering::Relaxed) == 0 {
                 interval.tick().await;
                 let elapsed = start_time.elapsed().as_secs_f64();
-                stats_clone.print_stats(elapsed);
+                stats_clone.print_stats(elapsed, &percentiles);
             }
 
             // Print final stats
             let elapsed = start_time.elapsed().as_secs_f64();
-            stats_clone.print_stats(elapsed);
+            stats_clone.print_stats(elapsed, &percentiles);
         })
     };
 
