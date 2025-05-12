@@ -191,10 +191,7 @@ async fn run_producer<T: Mempool>(
         None => None,
     };
 
-    let mut interval = match delay {
-        Some(d) => Some(time::interval(d)),
-        None => None,
-    };
+    let mut interval = delay.map(time::interval);
 
     while stop_signal.load(Ordering::Relaxed) == 0 && tx_counter < cfg.num_transactions {
         // If rate limiting is enabled, wait for the next tick
