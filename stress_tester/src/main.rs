@@ -35,7 +35,7 @@ fn run_naive(cfg: Cfg) -> anyhow::Result<()> {
         num_transactions: cfg.transaction_num,
         num_consumers: 1,
         payload_size_range: (256, 1_024),
-        drain_interval_ms: cfg.drain_interval_ms,
+        drain_interval_ms: cfg.drain_interval_us / 1_000,
         drain_batch_size: cfg.drain_batch_size,
         gas_price_range: (142, 654),
         run_duration_seconds: cfg.run_duration_seconds,
@@ -61,7 +61,7 @@ fn run_sync_channels(cfg: Cfg) -> anyhow::Result<()> {
         num_transactions: cfg.transaction_num,
         num_consumers: cfg.consumer_num,
         payload_size_range: (256, 1_024),
-        drain_interval_ms: cfg.drain_interval_ms,
+        drain_interval_ms: cfg.drain_interval_us / 1_000,
         drain_batch_size: cfg.drain_batch_size,
         gas_price_range: (142, 654),
         run_duration_seconds: cfg.run_duration_seconds,
@@ -86,7 +86,7 @@ fn run_sync_lock_based(cfg: Cfg) -> anyhow::Result<()> {
         num_transactions: cfg.transaction_num,
         num_consumers: cfg.consumer_num,
         payload_size_range: (256, 1_024),
-        drain_interval_ms: cfg.drain_interval_ms,
+        drain_interval_ms: cfg.drain_interval_us / 1_000,
         drain_batch_size: cfg.drain_batch_size,
         gas_price_range: (142, 654),
         run_duration_seconds: cfg.run_duration_seconds,
@@ -96,7 +96,7 @@ fn run_sync_lock_based(cfg: Cfg) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_async(_cfg: Cfg) -> anyhow::Result<()> {
+fn run_async(cfg: Cfg) -> anyhow::Result<()> {
     use async_impl::{StressTestCfg, run_stress_test};
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -104,15 +104,15 @@ fn run_async(_cfg: Cfg) -> anyhow::Result<()> {
         .build()?;
     rt.block_on(async {
         let cfg = StressTestCfg {
-            num_producers: 10,
-            num_transactions: 1_000_000,
-            num_consumers: 2,
+            num_producers: cfg.producer_num,
+            num_transactions: cfg.transaction_num,
+            num_consumers: cfg.consumer_num,
             payload_size_range: (100, 1000),
-            drain_interval_us: 100,
-            drain_batch_size: 1000,
+            drain_interval_us: cfg.drain_interval_us,
+            drain_batch_size: cfg.drain_batch_size,
             drain_timeout_us: 3_000,
             gas_price_range: (1, 1000),
-            run_duration_seconds: 30,
+            run_duration_seconds: cfg.run_duration_seconds,
             submission_rate: None, // Max speed
             latency_tracking: true,
             print_stats_interval_ms: 1000,

@@ -11,9 +11,9 @@ pub struct Cfg {
     /// Number of Consumers that will drain transactions from the memory pool.
     #[arg(short, long, default_value_t = 1)]
     pub consumer_num: usize,
-    /// Delay between the start of each drain interval.
+    /// Delay between the start of each drain operation.
     #[arg(long, default_value_t = 5)]
-    pub drain_interval_ms: u64,
+    pub drain_interval_us: u64,
     /// Number of transactions that will be drained per batch.
     #[arg(short = 'b', long, default_value_t = 100)]
     pub drain_batch_size: usize,
