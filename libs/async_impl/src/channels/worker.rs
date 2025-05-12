@@ -112,16 +112,12 @@ impl Queue {
             DrainStrategy::WaitForN { n: _n, timeout } => timeout,
         };
 
-        if storage.len() >= req.n {
+        // stop waiting if there are enough elements in the queue or the timeout is reached
+        if (storage.len() >= req.n) || (Instant::now() + Self::DRAIN_RETRY_DELAY > timeout) {
             Self::handle_drain_max(req, storage);
             return;
         }
-
         // if there are not enough elements in the buffer, wait a little bit before issuing another drain request
-        // stop if the timeout is reached
-        if Instant::now() + Self::DRAIN_RETRY_DELAY > timeout {
-            return;
-        }
         tokio::time::sleep(Self::DRAIN_RETRY_DELAY).await;
         drain_request_source
             .send(req)
@@ -160,4 +156,81 @@ fn prepare_channels(cfg: &Cfg) -> (Channels, InternalChannels) {
             drain_request_source,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+    use tokio::time;
+
+    use super::*;
+    use mempool::Transaction;
+
+    fn setup_queue() -> Queue {
+        // Small back pressure buffer
+        let cfg = Cfg {
+            capacity: 10,
+            submittance_back_pressure: 10,
+        };
+        Queue::start(cfg)
+    }
+
+    #[tokio::test]
+    async fn test_submit_and_drain_max() {
+        let queue = setup_queue();
+
+        let tx1 = Transaction::with_empty_load("tx1", 100, 1);
+        let tx2 = Transaction::with_empty_load("tx2", 200, 2);
+        let tx3 = Transaction::with_empty_load("tx3", 100, 0);
+
+        queue.submit(tx1.clone()).await.unwrap();
+        queue.submit(tx2.clone()).await.unwrap();
+        queue.submit(tx3.clone()).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        let result = queue.drain(2, 0).await.unwrap();
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0], tx2);
+        assert_eq!(result[1], tx3);
+
+        queue.stop();
+    }
+
+    #[tokio::test]
+    async fn test_drain_waiting_timeout_returns_partial_or_empty() {
+        let queue = setup_queue();
+
+        // No submissions
+        // Use a small timeout to force immediate return
+        let start = time::Instant::now();
+        let drained = queue.drain(1, 1).await.unwrap();
+        let elapsed = start.elapsed();
+        // Should return quickly without items
+        assert!(elapsed < Duration::from_millis(100));
+        assert!(drained.is_empty());
+
+        queue.stop();
+    }
+
+    #[tokio::test]
+    async fn test_drain_waiting_succeeds_when_items_arrive() {
+        let queue = setup_queue();
+
+        // Spawn a delayed submission
+        let delayed_queue = queue.clone();
+        tokio::spawn(async move {
+            time::sleep(Duration::from_millis(50)).await;
+            delayed_queue
+                .submit(Transaction::with_empty_load("tx_delayed", 150, 5))
+                .await
+                .unwrap();
+        });
+
+        // Drain waiting for 1 transaction, with timeout_us large enough
+        let drained = queue.drain(1, 200_000).await.unwrap();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].id, "tx_delayed");
+
+        queue.stop();
+    }
 }
