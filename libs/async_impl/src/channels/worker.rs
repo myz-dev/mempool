@@ -79,8 +79,8 @@ impl Queue {
                 req = channels.drain_request_sink.recv() => {
                     let req = req?;
                     match req.wait_strategy {
-                        DrainStrategy::DrainMax(_) => Self::handle_drain_max(req, &mut storage),
-                        DrainStrategy::WaitForN { n: _, timeout: _ } => {
+                        DrainStrategy::DrainMax => Self::handle_drain_max(req, &mut storage),
+                        DrainStrategy::WaitForN(_) => {
                             Self::handle_drain_waiting(req, &mut storage, &mut channels.drain_request_source).await;
                         }
                     }
@@ -108,8 +108,8 @@ impl Queue {
         drain_request_source: &mut sync::mpsc::Sender<DrainRequest>,
     ) {
         let timeout = match req.wait_strategy {
-            DrainStrategy::DrainMax(_) => return,
-            DrainStrategy::WaitForN { n: _n, timeout } => timeout,
+            DrainStrategy::DrainMax => return,
+            DrainStrategy::WaitForN(timeout) => timeout,
         };
 
         // stop waiting if there are enough elements in the queue or the timeout is reached

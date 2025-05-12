@@ -104,12 +104,12 @@ fn run_async(_cfg: Cfg) -> anyhow::Result<()> {
         .build()?;
     rt.block_on(async {
         let cfg = StressTestCfg {
-            num_producers: 4,
+            num_producers: 10,
             num_transactions: 1_000_000,
             num_consumers: 2,
             payload_size_range: (100, 1000),
             drain_interval_us: 100,
-            drain_batch_size: 500,
+            drain_batch_size: 1000,
             drain_timeout_us: 3_000,
             gas_price_range: (1, 1000),
             run_duration_seconds: 30,

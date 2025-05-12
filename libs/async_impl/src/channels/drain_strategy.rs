@@ -9,13 +9,13 @@ pub type ReceiveDrainage = sync::oneshot::Receiver<Vec<Transaction>>;
 /// Strategy to employ when draining items.
 #[derive(Debug, Clone, Copy)]
 pub enum DrainStrategy {
-    /// Try to drain `n` items. If there are less than `n` items in the queue at the time the drain
+    /// Try to drain n items. If there are less than n items in the queue at the time the drain
     /// operation starts, these items are returned immediately, without a wait for more items.
-    DrainMax(usize),
-    /// Try to drain `n` items from the queue.
+    DrainMax,
+    /// Try to drain n items from the queue.
     /// If the internal timer reaches the specified [`Instant`], the drain strategy will be converted
-    /// into `DrainMax` (e.g. at most `n` items will be returned).
-    WaitForN { n: usize, timeout: Instant },
+    /// into `DrainMax` (e.g. at most n items will be returned).
+    WaitForN(Instant),
 }
 
 #[derive(Debug)]
@@ -26,19 +26,16 @@ pub struct DrainRequest {
 }
 
 impl DrainStrategy {
-    /// Creates a new [`DrainStrategy`] with at most `n` items to drain.
-    pub fn new_standard(n: usize) -> Self {
-        Self::DrainMax(n)
+    /// Creates a new [`DrainStrategy::DrainMax`] instance.
+    pub fn new_standard() -> Self {
+        Self::DrainMax
     }
 
-    /// Creates a new [`DrainStrategy`] that tries to drain `n` elements for `timeout_us`.
-    /// Should the timeout be exceeded without the number of items in the queue reaching `n`,
+    /// Creates a new [`DrainStrategy`] that tries to drain n elements for `timeout_us`.
+    /// Should the timeout be exceeded without the number of items in the queue reaching n,
     /// all available items are drained.
-    pub fn new_timeout(n: usize, timeout_us: u64) -> Self {
-        Self::WaitForN {
-            n,
-            timeout: Instant::now() + Duration::from_micros(timeout_us),
-        }
+    pub fn new_timeout(timeout_us: u64) -> Self {
+        Self::WaitForN(Instant::now() + Duration::from_micros(timeout_us))
     }
 }
 
@@ -48,7 +45,7 @@ impl DrainRequest {
         (
             Self {
                 n,
-                wait_strategy: DrainStrategy::new_timeout(n, timeout_us),
+                wait_strategy: DrainStrategy::new_timeout(timeout_us),
                 send_back,
             },
             rx,
