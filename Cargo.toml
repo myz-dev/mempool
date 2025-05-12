@@ -1,13 +1,21 @@
 [workspace]
-members = ["libs/mempool", "libs/naive", "libs/sync", "stress_tester"]
+members = [
+    "libs/async_impl",
+    "libs/mempool",
+    "libs/naive",
+    "libs/sync",
+    "stress_tester",
+]
 resolver = "2"
 
 
 [workspace.dependencies]
 anyhow = "1"
+async-trait = "0.1"
 clap = "4.5"
 criterion = "0.5"
 crossbeam = "0.8"
 rand = "0.9"
 strum = "0.27"
+tokio = "1.45"
 uuid = "1.16"

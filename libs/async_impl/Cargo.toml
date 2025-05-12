@@ -1,0 +1,20 @@
+[package]
+edition = "2024"
+name = "async_impl"
+version = "0.1.0"
+
+[dependencies]
+mempool = { path = "./../mempool" }
+
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+rand = { workspace = true }
+tokio = { workspace = true, features = [
+    "macros",
+    "rt-multi-thread",
+    "sync",
+    "time",
+] }
+
+[dev-dependencies]
+criterion = { workspace = true }
