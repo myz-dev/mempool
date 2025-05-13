@@ -11,6 +11,8 @@ async-trait = { workspace = true }
 hdrhistogram = { workspace = true }
 num-format = { workspace = true, features = ["with-system-locale"] }
 rand = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = [
     "macros",
     "rt-multi-thread",

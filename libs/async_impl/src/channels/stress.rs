@@ -1,18 +1,21 @@
 use hdrhistogram::Histogram;
 use mempool::Transaction;
 use rand::Rng;
+use reqwest::Client;
 use std::{
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::{sync::Barrier, task::JoinHandle, time};
+use tokio::{
+    sync::{Barrier, Mutex},
+    task::JoinHandle,
+    time,
+};
 
 use crate::Mempool;
-
-use super::worker::Channels;
 
 #[derive(Debug, Clone)]
 pub struct StressTestCfg {
@@ -76,27 +79,23 @@ impl TestStats {
         self.drain_errors.fetch_add(1, Ordering::Relaxed);
     }
 
-    fn record_latency(&self, latency_us: u64) {
+    async fn record_latency(&self, latency_us: u64) {
         // Add to histogram for percentile calculation
-        if let Ok(mut hist) = self.latency_hist.lock() {
-            let lat = latency_us.min(hist.high());
-            hist.record(lat).expect("cannot exceed max");
-        }
+        let mut hist = self.latency_hist.lock().await;
+        let lat = latency_us.min(hist.high());
+        hist.record(lat).expect("cannot exceed max");
     }
 
     // Calculate the specified percentile from the histogram
-    fn calculate_percentile(&self, percentile: f64) -> Option<u64> {
-        if let Ok(hist) = self.latency_hist.lock() {
-            if hist.is_empty() {
-                return None;
-            }
-
-            return Some(hist.value_at_quantile(percentile / 100.0));
+    async fn calculate_percentile(&self, percentile: f64) -> Option<u64> {
+        let hist = self.latency_hist.lock().await;
+        if hist.is_empty() {
+            return None;
         }
-        None
+        Some(hist.value_at_quantile(percentile / 100.0))
     }
 
-    fn print_stats(&self, elapsed_seconds: f64, percentiles: &[f64]) {
+    async fn print_stats(&self, elapsed_seconds: f64, percentiles: &[f64]) {
         use num_format::{SystemLocale, ToFormattedString};
         let locale = SystemLocale::default().unwrap();
 
@@ -108,8 +107,10 @@ impl TestStats {
         let submit_rate = submitted as f64 / elapsed_seconds;
         let drain_rate = drained as f64 / elapsed_seconds;
 
-        let avg_latency = { self.latency_hist.lock().map(|h| h.mean()) }.unwrap_or_default();
-        let max_latency = { self.latency_hist.lock().map(|h| h.max()) }.unwrap_or_default();
+        let (avg_latency, max_latency) = {
+            let hist = self.latency_hist.lock().await;
+            (hist.mean(), hist.max())
+        };
 
         println!("--- MEMPOOL STATS [{:.2}s] ---", elapsed_seconds);
         println!("Submitted: {} txs ({:.2} txs/sec)", submitted, submit_rate);
@@ -126,7 +127,7 @@ impl TestStats {
         // Print percentiles
         print!("Percentiles: ");
         for &p in percentiles {
-            if let Some(latency) = self.calculate_percentile(p) {
+            if let Some(latency) = self.calculate_percentile(p).await {
                 print!("P{:.1}: {} μs, ", p, latency.to_formatted_string(&locale));
             }
         }
@@ -210,7 +211,7 @@ async fn run_consumer<T: Mempool>(
                         .try_into()
                         .expect("conversion okay for the next few years");
 
-                    stats.record_latency(delta_us);
+                    stats.record_latency(delta_us).await;
                 }
 
                 stats.record_drain_success(txs.len() as u64);
@@ -288,12 +289,12 @@ pub async fn run_stress_test<T: Mempool + Clone>(config: StressTestCfg, queue: T
             while printer_stop.load(Ordering::Relaxed) == 0 {
                 interval.tick().await;
                 let elapsed = start_time.elapsed().as_secs_f64();
-                stats_clone.print_stats(elapsed, &percentiles);
+                stats_clone.print_stats(elapsed, &percentiles).await;
             }
 
             // Print final stats
             let elapsed = start_time.elapsed().as_secs_f64();
-            stats_clone.print_stats(elapsed, &percentiles);
+            stats_clone.print_stats(elapsed, &percentiles).await;
         })
     };
 
@@ -347,37 +348,129 @@ fn generate_random_transaction(cfg: &StressTestCfg, tx_counter: usize) -> Transa
 }
 
 /// HTTP implementor of `Mempool` trait.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HttpFacade {
-    channels: Channels,
     runner_handle: Arc<JoinHandle<Option<()>>>,
     server_handle: Arc<JoinHandle<anyhow::Result<()>>>,
+    client_pool: ClientPool,
 }
 
 #[async_trait::async_trait]
 impl Mempool for HttpFacade {
     async fn submit(&self, tx: Transaction) -> anyhow::Result<()> {
-        todo!()
+        let client = self
+            .client_pool
+            .get_client()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("no client to send http request"))?;
+
+        let url = format!("http://0.0.0.0:8080/submit/{}", 50_000);
+
+        let response = client.post(&url).json(&tx).send().await?;
+
+        // Return client to pool
+        self.client_pool.return_client(client).await;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to submit transaction: {}",
+                response.status()
+            ));
+        }
+
+        Ok(())
     }
+
     async fn drain(&self, n: usize, timeout_us: u64) -> anyhow::Result<Vec<Transaction>> {
-        todo!()
+        let client = self
+            .client_pool
+            .get_client()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("no client to send http request"))?;
+
+        let url = format!("http://0.0.0.0:8080/drain/{}/{}", n, timeout_us);
+
+        let response = client.get(&url).send().await?;
+
+        // Return client to pool
+        self.client_pool.return_client(client).await;
+
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "Failed to drain transactions: {}",
+                response.status()
+            ));
+        }
+
+        #[derive(Debug, serde::Deserialize)]
+        pub struct Drainage(Vec<Transaction>);
+
+        let drainage: Drainage = response.json().await?;
+        Ok(drainage.0)
     }
 }
 
 impl HttpFacade {
     pub fn new(
-        channels: Channels,
         runner_handle: Arc<JoinHandle<Option<()>>>,
         server_handle: Arc<JoinHandle<anyhow::Result<()>>>,
     ) -> Self {
         Self {
-            channels,
             runner_handle,
             server_handle,
+            client_pool: ClientPool::new(100),
         }
     }
     pub fn stop(self) {
         self.runner_handle.abort();
         self.server_handle.abort();
+    }
+}
+
+/// Very simple pool implementation to use during the HTTP stress test.
+/// The pool creates a few clients in advance and wraps them in `Arc<Mutex>` so
+/// that they can be used within any task that needs to send HTTP requests.
+// Client pool that can be shared across threads
+#[derive(Clone)]
+pub struct ClientPool {
+    clients: Arc<Mutex<Vec<Client>>>,
+    max_clients: usize,
+}
+
+impl ClientPool {
+    pub fn new(max_clients: usize) -> Self {
+        let mut clients = Vec::with_capacity(max_clients);
+
+        for _ in 0..max_clients {
+            clients.push(Client::new());
+        }
+
+        ClientPool {
+            clients: Arc::new(Mutex::new(clients)),
+            max_clients,
+        }
+    }
+
+    pub async fn get_client(&self) -> Option<Client> {
+        let mut clients = self.clients.lock().await;
+
+        if clients.is_empty() {
+            if clients.len() < self.max_clients {
+                Some(Client::new())
+            } else {
+                None // Pool exhausted
+            }
+        } else {
+            // Return an existing client
+            clients.pop()
+        }
+    }
+
+    pub async fn return_client(&self, client: Client) {
+        let mut clients = self.clients.lock().await;
+        if clients.len() < self.max_clients {
+            clients.push(client);
+        }
+        // If over max_clients, client is dropped
     }
 }

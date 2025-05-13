@@ -112,7 +112,7 @@ fn run_async(cfg: Cfg) -> anyhow::Result<()> {
             payload_size_range: (100, 1000),
             drain_interval_us: cfg.drain_interval_us,
             drain_batch_size: cfg.drain_batch_size,
-            drain_timeout_us: 3_000,
+            drain_timeout_us: 50_000,
             gas_price_range: (1, 1000),
             run_duration_seconds: cfg.run_duration_seconds,
             submission_rate: None, // Max speed
@@ -149,7 +149,7 @@ async fn prepare_http_server(
 
     let queue = async_impl::worker::Queue::start(queue_cfg);
     let (channels, runner_handle) = queue.detach_channels();
-    let (submittance_source, drain_request_source) = channels.clone().into_parts();
+    let (submittance_source, drain_request_source) = channels.into_parts();
 
     let server_handle = http::start_server(
         cfg.http_port.unwrap_or(8080),
@@ -159,5 +159,5 @@ async fn prepare_http_server(
     .await
     .expect("can start server");
 
-    async_impl::HttpFacade::new(channels, runner_handle, Arc::new(server_handle))
+    async_impl::HttpFacade::new(runner_handle, Arc::new(server_handle))
 }
