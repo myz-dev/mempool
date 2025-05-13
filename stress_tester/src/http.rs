@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use crate::cfg::Cfg;
 use anyhow::Context;
 use async_impl::drain_strategy::DrainRequest;
 use axum::{
@@ -11,24 +10,26 @@ use axum::{
     routing::{get, post},
 };
 use mempool::Transaction;
-use tokio::select;
+use tokio::{select, sync::mpsc::Sender, task::JoinHandle};
 
 #[derive(Clone)]
-pub struct SubmittanceSource(tokio::sync::mpsc::Sender<Transaction>);
+pub struct SubmittanceSource(Sender<Transaction>);
 
 pub async fn start_server(
-    cfg: Cfg,
-    submittance_source: SubmittanceSource,
-    drain_request_source: DrainRequestSource,
-) -> anyhow::Result<()> {
-    let listener =
-        tokio::net::TcpListener::bind(format!("0.0.0.0:{}", cfg.http_port.unwrap_or(8080))).await?;
+    port: u16,
+    submittance_source: Sender<Transaction>,
+    drain_request_source: Sender<DrainRequest>,
+) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port)).await?;
     println!("HTTP server listening on {}", listener.local_addr()?);
 
     let app = build_router(submittance_source, drain_request_source);
-    axum::serve(listener, app.into_make_service())
-        .await
-        .context("server crashed")
+
+    Ok(tokio::spawn(async move {
+        axum::serve(listener, app)
+            .await
+            .context("http server crashed")
+    }))
 }
 
 /// Submit the transaction transmitted in the request body to the managed priority queue.
@@ -57,7 +58,7 @@ async fn submit_transaction(
 
 /// Return type of drain request.
 #[derive(Clone)]
-pub struct DrainRequestSource(tokio::sync::mpsc::Sender<DrainRequest>);
+pub struct DrainRequestSource(Sender<DrainRequest>);
 
 #[derive(Debug, serde::Serialize)]
 pub struct Drainage(Vec<Transaction>);
@@ -98,9 +99,12 @@ async fn drain_transactions(
 }
 
 fn build_router(
-    submittance_source: SubmittanceSource,
-    drain_request_source: DrainRequestSource,
+    submittance_source: Sender<Transaction>,
+    drain_request_source: Sender<DrainRequest>,
 ) -> axum::Router {
+    let submittance_source = SubmittanceSource(submittance_source);
+    let drain_request_source = DrainRequestSource(drain_request_source);
+
     axum::Router::new()
         .route("/submit/{timeout_us}", post(submit_transaction))
         .with_state(submittance_source)

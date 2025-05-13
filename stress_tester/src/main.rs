@@ -1,3 +1,4 @@
+use async_impl::HttpFacade;
 use cfg::Cfg;
 use clap::Parser;
 use naive::NaivePool;
@@ -124,10 +125,39 @@ fn run_async(cfg: Cfg) -> anyhow::Result<()> {
             capacity: cfg.num_producers * cfg.num_transactions,
             submittance_back_pressure: 3_000,
         };
-        let queue = async_impl::worker::Queue::start(queue_cfg);
-        run_stress_test(cfg, queue.clone()).await;
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        queue.stop()
+
+        if cfg.http_port.is_some() {
+            let http_based_tester = prepare_http_server(queue_cfg.clone(), &cfg).await;
+            run_stress_test(cfg, http_based_tester.clone()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            http_based_tester.stop();
+        } else {
+            let queue = async_impl::worker::Queue::start(queue_cfg);
+            run_stress_test(cfg, queue.clone()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            queue.stop()
+        }
     });
     Ok(())
+}
+
+async fn prepare_http_server(
+    queue_cfg: async_impl::worker::Cfg,
+    cfg: &async_impl::StressTestCfg,
+) -> HttpFacade {
+    use std::sync::Arc;
+
+    let queue = async_impl::worker::Queue::start(queue_cfg);
+    let (channels, runner_handle) = queue.detach_channels();
+    let (submittance_source, drain_request_source) = channels.clone().into_parts();
+
+    let server_handle = http::start_server(
+        cfg.http_port.unwrap_or(8080),
+        submittance_source,
+        drain_request_source,
+    )
+    .await
+    .expect("can start server");
+
+    async_impl::HttpFacade::new(channels, runner_handle, Arc::new(server_handle))
 }

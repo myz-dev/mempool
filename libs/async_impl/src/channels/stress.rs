@@ -8,9 +8,11 @@ use std::{
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tokio::{sync::Barrier, time};
+use tokio::{sync::Barrier, task::JoinHandle, time};
 
 use crate::Mempool;
+
+use super::worker::Channels;
 
 #[derive(Debug, Clone)]
 pub struct StressTestCfg {
@@ -163,31 +165,7 @@ async fn run_producer<T: Mempool>(
         if let Some(ref mut i) = interval {
             i.tick().await;
         }
-
-        // Generate random transaction
-        let tx = {
-            let mut rng = rand::rng();
-            let gas_price = rng.random_range(cfg.gas_price_range.0..=cfg.gas_price_range.1);
-            let payload_size =
-                rng.random_range(cfg.payload_size_range.0..=cfg.payload_size_range.1);
-            let payload = (0..payload_size).map(|_| rng.random::<u8>()).collect();
-
-            let timestamp = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("time flowing forwards")
-                .as_micros()
-                .try_into()
-                .expect("conversion okay for the next few years");
-
-            let id = format!("tx-{}", tx_counter);
-
-            Transaction {
-                id,
-                gas_price,
-                timestamp,
-                payload,
-            }
-        };
+        let tx = generate_random_transaction(&cfg, tx_counter);
 
         match queue.submit(tx).await {
             Ok(_) => {
@@ -341,4 +319,65 @@ pub async fn run_stress_test<T: Mempool + Clone>(config: StressTestCfg, queue: T
     }
 
     let _ = stats_printer.await;
+}
+
+fn generate_random_transaction(cfg: &StressTestCfg, tx_counter: usize) -> Transaction {
+    // Generate random transaction
+
+    let mut rng = rand::rng();
+    let gas_price = rng.random_range(cfg.gas_price_range.0..=cfg.gas_price_range.1);
+    let payload_size = rng.random_range(cfg.payload_size_range.0..=cfg.payload_size_range.1);
+    let payload = (0..payload_size).map(|_| rng.random::<u8>()).collect();
+
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("time flowing forwards")
+        .as_micros()
+        .try_into()
+        .expect("conversion okay for the next few years");
+
+    let id = format!("tx-{}", tx_counter);
+
+    Transaction {
+        id,
+        gas_price,
+        timestamp,
+        payload,
+    }
+}
+
+/// HTTP implementor of `Mempool` trait.
+#[derive(Debug, Clone)]
+pub struct HttpFacade {
+    channels: Channels,
+    runner_handle: Arc<JoinHandle<Option<()>>>,
+    server_handle: Arc<JoinHandle<anyhow::Result<()>>>,
+}
+
+#[async_trait::async_trait]
+impl Mempool for HttpFacade {
+    async fn submit(&self, tx: Transaction) -> anyhow::Result<()> {
+        todo!()
+    }
+    async fn drain(&self, n: usize, timeout_us: u64) -> anyhow::Result<Vec<Transaction>> {
+        todo!()
+    }
+}
+
+impl HttpFacade {
+    pub fn new(
+        channels: Channels,
+        runner_handle: Arc<JoinHandle<Option<()>>>,
+        server_handle: Arc<JoinHandle<anyhow::Result<()>>>,
+    ) -> Self {
+        Self {
+            channels,
+            runner_handle,
+            server_handle,
+        }
+    }
+    pub fn stop(self) {
+        self.runner_handle.abort();
+        self.server_handle.abort();
+    }
 }

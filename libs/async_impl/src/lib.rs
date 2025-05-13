@@ -2,7 +2,7 @@ use mempool::Transaction;
 
 mod channels;
 pub use channels::drain_strategy;
-pub use channels::stress::{StressTestCfg, run_stress_test};
+pub use channels::stress::{HttpFacade, StressTestCfg, run_stress_test};
 pub use channels::worker;
 
 #[async_trait::async_trait]

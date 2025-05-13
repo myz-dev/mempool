@@ -1,4 +1,4 @@
-use std::{collections::BinaryHeap, time::Duration};
+use std::{collections::BinaryHeap, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use mempool::Transaction;
@@ -14,7 +14,7 @@ pub struct Queue {
 
     /// Handle to the worker task that manages the internal storage of the queue.
     /// Abort this task to drop the associated memory and stop
-    runner_handle: std::sync::Arc<JoinHandle<Option<()>>>,
+    runner_handle: Arc<JoinHandle<Option<()>>>,
 }
 
 #[async_trait::async_trait]
@@ -38,6 +38,7 @@ impl Mempool for Queue {
             .context("could not receive drainage result from queue")
     }
 }
+#[derive(Debug, Clone)]
 pub struct Cfg {
     /// Initial capacity of the queue. It will grow as needed as items are added.
     /// # Note
@@ -54,14 +55,24 @@ pub struct Channels {
     drain_request_source: sync::mpsc::Sender<DrainRequest>,
 }
 
+impl Channels {
+    pub fn into_parts(
+        self,
+    ) -> (
+        sync::mpsc::Sender<Transaction>,
+        sync::mpsc::Sender<DrainRequest>,
+    ) {
+        (self.submittance_source, self.drain_request_source)
+    }
+}
+
 impl Queue {
     const DRAIN_RETRY_DELAY: Duration = Duration::from_nanos(100);
 
     pub fn start(cfg: Cfg) -> Self {
         let (channels, internal_channels) = prepare_channels(&cfg);
 
-        let runner_handle =
-            std::sync::Arc::new(tokio::task::spawn(Self::run(cfg, internal_channels)));
+        let runner_handle = Arc::new(tokio::task::spawn(Self::run(cfg, internal_channels)));
         Self {
             runner_handle,
             channels,
@@ -132,6 +143,12 @@ impl Queue {
     pub fn stop(self) {
         // TODO: We might collect all remaining items in the queue and return them here.
         self.runner_handle.abort();
+    }
+
+    /// Detach all channels from this instance of the `Queue` to use them elsewhere.
+    /// This function is added to easily accommodate for the HTTP implementation of the `Mempool` trait.
+    pub fn detach_channels(self) -> (Channels, Arc<JoinHandle<Option<()>>>) {
+        (self.channels, self.runner_handle)
     }
 }
 
