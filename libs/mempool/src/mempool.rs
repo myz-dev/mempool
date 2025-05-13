@@ -5,7 +5,7 @@ pub trait Mempool: Send + Sync + 'static {
     fn drain(&self, n: usize) -> Vec<Transaction>;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Transaction {
     pub id: String,
     pub gas_price: u64,

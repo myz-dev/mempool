@@ -18,8 +18,12 @@ pub struct Cfg {
     #[arg(short = 'b', long, default_value_t = 100)]
     pub drain_batch_size: usize,
     // Hard cap on the test's execution time
-    #[arg(long, long, default_value_t = 10)]
+    #[arg(long, default_value_t = 10)]
     pub run_duration_seconds: u64,
+    /// If a `http_port` is passed when the async implementation is tested, the stress test is performed
+    /// via http requests.
+    #[arg(long)]
+    pub http_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, strum::EnumString, clap::ValueEnum)]

@@ -3,7 +3,8 @@ use clap::Parser;
 use naive::NaivePool;
 use sync::{ChanneledQueue, LockedQueue};
 
-pub mod cfg;
+mod cfg;
+mod http;
 
 fn main() {
     let cfg = cfg::Cfg::parse();
@@ -117,6 +118,7 @@ fn run_async(cfg: Cfg) -> anyhow::Result<()> {
             latency_tracking: true,
             print_stats_interval_ms: 1000,
             latency_percentiles: vec![50.0, 90.0, 99.0, 99.9],
+            http_port: cfg.http_port,
         };
         let queue_cfg = async_impl::worker::Cfg {
             capacity: cfg.num_producers * cfg.num_transactions,

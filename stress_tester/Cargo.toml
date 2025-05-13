@@ -4,12 +4,15 @@ name = "stress_tester"
 version = "0.1.0"
 
 [dependencies]
+async_impl = { path = "./../libs/async_impl" }
 mempool = { path = "./../libs/mempool" }
 naive = { path = "./../libs/naive" }
 sync = { path = "./../libs/sync" }
-async_impl = { path = "./../libs/async_impl" }
+
 
 anyhow = { workspace = true }
+axum = { workspace = true, features = ["macros"] }
 clap = { workspace = true, features = ["derive"] }
+serde = { workspace = true, features = ["derive"] }
 strum = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -31,6 +31,8 @@ pub struct StressTestCfg {
     pub print_stats_interval_ms: u64,
     /// Percentiles to track (e.g. [50.0, 90.0, 99.0, 99.9])
     pub latency_percentiles: Vec<f64>,
+
+    pub http_port: Option<u16>,
 }
 
 struct TestStats {
