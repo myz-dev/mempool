@@ -23,8 +23,8 @@ Generally the `async` versions easily outperforms all other implementations in t
 
 | Producers | Consumers | DrainBatch | Submitted / Drained             | Latency P50.0 / P99.0 [μs]     | Throughput [Transaction per second]                                                  |
 | --------  | --------  | --------   | --------                        | --------                       | --------                                                                             |
-| 15        | 5         | 100        | 1173174 / 1170166               | 581 / 6_451                    | ~106_000                                                                             |
-| 20        | 1         | 100        | 5302084 / 4455100               | 35 / 1_,_924                   | >400_000                                                                             |
+| 15        | 5         | 100        | 1173174 / 1170166               | 581 / 6_451                    | ~106k                                                                                |
+| 20        | 1         | 100        | 5302084 / 4455100               | 35 / 1_,_924                   | >400k                                                                                |
 
 Run tests with:
 
@@ -33,3 +33,13 @@ cargo run -r -- async -p 20 -c 1 -t 500000
 ```
 
 The stress test show that this implementation also heavily benefits from less active draining consumer tasks.
+
+## HTTP test results
+
+First tests using the new HTTP test interface show how the queue might perform in a real world usage example.
+Here the throughput is dramatically less, which should be caused by the introduced network lag.
+
+| Producers | Consumers | DrainBatch | Submitted / Drained             | Latency P50.0 / P99.0 [μs]     | Throughput [Transaction per second]                                                  |
+| --------  | --------  | --------   | --------                        | --------                       | --------                                                                             |
+| 10        | 1         | 100        | 128952 / 127776                 | 3,473 / 53_375                 | ~11k                                                                                 |
+| 20        | 1         | 100        | 183394 / 182569                 | 3_779 / 39_327                 | ~19k                                                                                 |
