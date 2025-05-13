@@ -26,7 +26,7 @@ Generally the `async` versions easily outperforms all other implementations in t
 | 15        | 5         | 100        | 1173174 / 1170166               | 581 / 6_451                    | ~106k                                                                                |
 | 20        | 1         | 100        | 5302084 / 4455100               | 35 / 1_,_924                   | >400k                                                                                |
 
-Run tests with:
+Run tests template:
 
 ```shell
 cargo run -r -- async -p 20 -c 1 -t 500000
@@ -43,3 +43,9 @@ Here the throughput is dramatically less, which should be caused by the introduc
 | --------  | --------  | --------   | --------                        | --------                       | --------                                                                             |
 | 10        | 1         | 100        | 128952 / 127776                 | 3,473 / 53_375                 | ~11k                                                                                 |
 | 20        | 1         | 100        | 183394 / 182569                 | 3_779 / 39_327                 | ~19k                                                                                 |
+
+Run tests template:
+
+```shell
+cargo run -r -- async -p 20 -c 1 -t 500000 --http-port 8080 
+```

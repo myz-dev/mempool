@@ -31,17 +31,17 @@ For a test running 10 seconds:
 | 15        | 5         | 500_000  | 100        | 325286 / 325286                 | 359400 / 28612                    | Channels could not drain all items in queue                                          |
 | 50        | 5         | 500_000  | 100        | 429472 / 429472                 | 429326 / 9640                     | This tests displays that the implementation needs attention at the drain mechanism   |
 
-Run tests with:
+Run tests template:
 
 ```shell
 cargo run -r -- sync-channels -p 15 -c 5 -t 500000
 ```
 
-Or: 
+Or:
 
 ```shell
 cargo run -r -- sync-locks -p 15 -c 5 -t 500000
 ```
 
 The data actually shows that the channel based solution is struggling to drain the queue fast enough. As no effort has been spent optimizing this part of the implementation, it remains unclear how much 
-potential lies within this approach. 
+potential lies within this approach.
