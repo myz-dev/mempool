@@ -200,15 +200,18 @@ mod tests {
         let tx2 = Transaction::with_empty_load("tx2", 200, 2);
         let tx3 = Transaction::with_empty_load("tx3", 100, 0);
 
-        queue.submit(tx1.clone()).await.unwrap();
-        queue.submit(tx2.clone()).await.unwrap();
-        queue.submit(tx3.clone()).await.unwrap();
+        let tx2_ident = Transaction::with_empty_load("tx2", 200, 2);
+        let tx3_ident = Transaction::with_empty_load("tx3", 100, 0);
+        
+        queue.submit(tx1).await.unwrap();
+        queue.submit(tx2).await.unwrap();
+        queue.submit(tx3).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(1)).await;
         let result = queue.drain(2, 0).await.unwrap();
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0], tx2);
-        assert_eq!(result[1], tx3);
+        assert_eq!(result[0], tx2_ident);
+        assert_eq!(result[1], tx3_ident);
 
         queue.stop();
     }
