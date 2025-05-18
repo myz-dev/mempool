@@ -1,6 +1,7 @@
+use std::hint::black_box;
 use std::time::Instant;
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 use mempool::{Mempool, Transaction};
 use naive::NaivePool;
 
