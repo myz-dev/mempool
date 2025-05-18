@@ -36,4 +36,6 @@ pub enum Implementation {
     SyncLocks,
     #[strum(ascii_case_insensitive)]
     Async,
+    #[strum(ascii_case_insensitive)]
+    AsyncLocks,
 }

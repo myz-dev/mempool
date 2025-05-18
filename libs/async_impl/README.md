@@ -49,3 +49,12 @@ Run tests template:
 ```shell
 cargo run -r -- async -p 20 -c 1 -t 500000 --http-port 8080 
 ```
+
+## Comparison basic lock based async queue
+
+Testing a very simple lock based queue implementation reveals, that it performs much worse than the channel based implementation.
+
+| Producers | Consumers | DrainBatch | Submitted / Drained             | Latency P50.0 / P99.0 [μs]     | Throughput [Transaction per second] ( <--> Comparison channel based)                 |
+| --------  | --------  | --------   | --------                        | --------                       | --------                                                                             |
+| 10        | 1         | 100        | 2,664,912 / 994,400             | 997 / 1,606                    | ~266k ( <--> 1,111k)                                                                 |
+| 20        | 1         | 100        | 2,677,611 /  992,300            | 999 / 1,665                    | ~243k ( <--> 1,396k)                                                                 |

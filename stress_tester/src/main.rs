@@ -16,6 +16,7 @@ fn main() {
         cfg::Implementation::SyncChannels => run_sync_channels(cfg),
         cfg::Implementation::SyncLocks => run_sync_lock_based(cfg),
         cfg::Implementation::Async => run_async(cfg),
+        cfg::Implementation::AsyncLocks => run_async_locks(cfg),
     };
     if let Err(e) = res {
         eprintln!("Error: {e:?}");
@@ -160,4 +161,43 @@ async fn prepare_http_server(
     .expect("can start server");
 
     async_impl::HttpFacade::new(runner_handle, Arc::new(server_handle))
+}
+
+fn run_async_locks(cfg: Cfg) -> anyhow::Result<()> {
+    use async_impl::{StressTestCfg, run_stress_test};
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    rt.block_on(async {
+        let cfg = StressTestCfg {
+            num_producers: cfg.producer_num,
+            num_transactions: cfg.transaction_num,
+            num_consumers: cfg.consumer_num,
+            payload_size_range: (100, 1000),
+            drain_interval_us: cfg.drain_interval_us,
+            drain_batch_size: cfg.drain_batch_size,
+            drain_timeout_us: 50_000,
+            gas_price_range: (1, 1000),
+            run_duration_seconds: cfg.run_duration_seconds,
+            submission_rate: None, // Max speed
+            latency_tracking: true,
+            print_stats_interval_ms: 1000,
+            latency_percentiles: vec![50.0, 90.0, 99.0, 99.9],
+            http_port: cfg.http_port,
+        };
+        let _queue_cfg = async_impl::worker::Cfg {
+            capacity: cfg.num_producers * cfg.num_transactions,
+            submittance_back_pressure: 3_000,
+        };
+
+        if cfg.http_port.is_some() {
+            todo!("implement http based testing of the locked queue...");
+        } else {
+            let queue = async_impl::LockedQueue::new(cfg.num_producers * cfg.num_transactions);
+            run_stress_test(cfg, queue.clone()).await;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    });
+    Ok(())
 }
